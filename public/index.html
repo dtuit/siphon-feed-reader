@@ -508,7 +508,7 @@ function renderFeedList(){
     lastWasFav=isFav;
 
     const fa=articles.filter(a=>a.feedUrl===f.url),ct=fa.length,ur=fa.filter(a=>!isRead(a)).length,fn=fa.filter(a=>isNew(a)).length;
-    const init=(f.title||'?')[0].toUpperCase(),icn=f.icon?'<img src="'+esc(f.icon)+'" onerror="this.parentElement.textContent=\''+init+'\'">':init;
+    const init=esc((f.title||'?')[0].toUpperCase()),icn=f.icon?'<img src="'+esc(f.icon)+'" onerror="this.parentElement.textContent=\''+init+'\'">':init;
     const mid='menu_'+f.url.replace(/\W/g,'_');
     const eu=esc(f.url);
     const fidx=feeds.indexOf(f);
@@ -596,7 +596,7 @@ function openArticle(idx){
 function renderOpenArticle(){
   const f=getFiltered();if(activeArticleIdx<0||activeArticleIdx>=f.length)return;const a=f[activeArticleIdx],rd=isRead(a);
   const se=document.getElementById('readerScroll');document.getElementById('readerHeaderLabel').textContent=esc(a.feedTitle);
-  se.innerHTML='<div class="reader-title">'+esc(a.title)+'</div><div class="reader-meta"><span class="source">'+esc(a.feedTitle)+'</span>'+(a.author?'<span>'+esc(a.author)+'</span>':'')+'<span>'+fmtDate(a.pubDate)+'</span><button class="reader-read-toggle" onclick="toggleReadInReader()">'+(rd?'✓ Read — mark unread':'○ Unread — mark read')+'</button></div>'+(a.link?'<a class="reader-link" href="'+esc(a.link)+'" target="_blank" rel="noopener">Open original ↗</a>':'')+'<div class="reader-content">'+sanitize(a.content||a.description)+'</div><div class="reader-nav">'+(activeArticleIdx>0?'<button class="btn btn-small btn-ghost" onclick="openArticle('+(activeArticleIdx-1)+')">← Previous</button>':'')+(activeArticleIdx<f.length-1?'<button class="btn btn-small btn-ghost" onclick="openArticle('+(activeArticleIdx+1)+')">Next →</button>':'')+'</div>';
+  se.innerHTML='<div class="reader-title">'+esc(a.title)+'</div><div class="reader-meta"><span class="source">'+esc(a.feedTitle)+'</span>'+(a.author?'<span>'+esc(a.author)+'</span>':'')+'<span>'+fmtDate(a.pubDate)+'</span><button class="reader-read-toggle" onclick="toggleReadInReader()">'+(rd?'✓ Read — mark unread':'○ Unread — mark read')+'</button></div>'+(a.link?'<a class="reader-link" href="'+esc(a.link)+'" target="_blank" rel="noopener noreferrer">Open original ↗</a>':'')+'<div class="reader-content">'+sanitize(a.content||a.description)+'</div><div class="reader-nav">'+(activeArticleIdx>0?'<button class="btn btn-small btn-ghost" onclick="openArticle('+(activeArticleIdx-1)+')">← Previous</button>':'')+(activeArticleIdx<f.length-1?'<button class="btn btn-small btn-ghost" onclick="openArticle('+(activeArticleIdx+1)+')">Next →</button>':'')+'</div>';
   se.scrollTop=0;
 }
 
@@ -604,8 +604,8 @@ function renderOpenArticle(){
 // SYNC
 // ═══════════════════════════════════════
 async function hashPhrase(p){const enc=new TextEncoder();const km=await crypto.subtle.importKey('raw',enc.encode(p),'PBKDF2',false,['deriveBits']);const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:enc.encode('siphon-feed-reader-sync-v2'),iterations:600000,hash:'SHA-256'},km,256);return[...new Uint8Array(bits)].map(b=>b.toString(16).padStart(2,'0')).join('')}
-function getSyncPhrase(){return(localStorage.getItem('siphon_sync_phrase')||'').trim()}
-function saveSyncPhrase(p){localStorage.setItem('siphon_sync_phrase',p.trim())}
+function getSyncPhrase(){return(sessionStorage.getItem('siphon_sync_phrase')||'').trim()}
+function saveSyncPhrase(p){sessionStorage.setItem('siphon_sync_phrase',p.trim())}
 function syncStatusMsg(msg){const el=document.getElementById('syncStatus');if(el)el.textContent=msg}
 
 async function syncPull(key){

@@ -10,7 +10,16 @@ export default {
       return handleSync(request, url, env);
     }
 
-    return env.ASSETS.fetch(request);
+    const assetResp = await env.ASSETS.fetch(request);
+    return new Response(assetResp.body, {
+      status: assetResp.status,
+      headers: {
+        ...Object.fromEntries(assetResp.headers),
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "no-referrer",
+      },
+    });
   },
 };
 
@@ -104,7 +113,7 @@ const ALLOWED_CONTENT_TYPES = [
 
 async function handleProxy(request, url) {
   if (request.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders() });
+    return new Response(null, { headers: corsHeaders(request) });
   }
 
   const target = url.searchParams.get("url");
@@ -148,7 +157,7 @@ async function handleProxy(request, url) {
         if (!location) {
           return new Response("Redirect with no Location header", {
             status: 502,
-            headers: corsHeaders(),
+            headers: corsHeaders(request),
           });
         }
 
@@ -158,21 +167,21 @@ async function handleProxy(request, url) {
         } catch {
           return new Response("Invalid redirect URL", {
             status: 502,
-            headers: corsHeaders(),
+            headers: corsHeaders(request),
           });
         }
 
         if (!["http:", "https:"].includes(redirectParsed.protocol)) {
           return new Response("Redirect to non-HTTP protocol blocked", {
             status: 403,
-            headers: corsHeaders(),
+            headers: corsHeaders(request),
           });
         }
 
         if (isPrivateHostname(redirectParsed.hostname)) {
           return new Response("Redirect to private network blocked", {
             status: 403,
-            headers: corsHeaders(),
+            headers: corsHeaders(request),
           });
         }
 
@@ -185,7 +194,7 @@ async function handleProxy(request, url) {
       if (ct && !ALLOWED_CONTENT_TYPES.some((t) => ct.includes(t))) {
         return new Response("Unexpected content type", {
           status: 403,
-          headers: corsHeaders(),
+          headers: corsHeaders(request),
         });
       }
 
@@ -194,7 +203,7 @@ async function handleProxy(request, url) {
       if (contentLength && parseInt(contentLength) > MAX_RESPONSE_SIZE) {
         return new Response("Response too large", {
           status: 413,
-          headers: corsHeaders(),
+          headers: corsHeaders(request),
         });
       }
 
@@ -202,27 +211,37 @@ async function handleProxy(request, url) {
       if (body.byteLength > MAX_RESPONSE_SIZE) {
         return new Response("Response too large", {
           status: 413,
-          headers: corsHeaders(),
+          headers: corsHeaders(request),
         });
       }
 
+      // Validate response looks like a feed (mitigate DNS rebinding)
+      const text = new TextDecoder().decode(body);
+      if (!/<rss[\s>]|<feed[\s>]|<channel[\s>]|<entry[\s>]/i.test(text)) {
+        return new Response("Response does not appear to be a feed", {
+          status: 403,
+          headers: corsHeaders(request),
+        });
+      }
+
+      // Always return as text/plain to prevent browser rendering of HTML
       return new Response(body, {
         status: resp.status,
         headers: {
-          ...corsHeaders(),
-          "Content-Type": resp.headers.get("Content-Type") || "text/xml",
+          ...corsHeaders(request),
+          "Content-Type": "text/plain; charset=utf-8",
         },
       });
     }
 
     return new Response("Too many redirects", {
       status: 502,
-      headers: corsHeaders(),
+      headers: corsHeaders(request),
     });
   } catch {
     return new Response("Fetch failed: unable to retrieve the requested resource", {
       status: 502,
-      headers: corsHeaders(),
+      headers: corsHeaders(request),
     });
   }
 }
@@ -232,7 +251,7 @@ const MAX_BODY = 1024 * 1024; // 1 MB
 
 async function handleSync(request, url, env) {
   if (request.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders() });
+    return new Response(null, { headers: corsHeaders(request) });
   }
 
   const key = url.searchParams.get("key");
@@ -243,10 +262,10 @@ async function handleSync(request, url, env) {
   if (request.method === "GET") {
     const data = await env.SYNC_KV.get(key);
     if (data === null) {
-      return new Response("Not found", { status: 404, headers: corsHeaders() });
+      return new Response("Not found", { status: 404, headers: corsHeaders(request) });
     }
     return new Response(data, {
-      headers: { ...corsHeaders(), "Content-Type": "application/json" },
+      headers: { ...corsHeaders(request), "Content-Type": "application/json" },
     });
   }
 
@@ -265,16 +284,23 @@ async function handleSync(request, url, env) {
       return new Response("Invalid JSON", { status: 400 });
     }
     await env.SYNC_KV.put(key, body);
-    return new Response("OK", { status: 200, headers: corsHeaders() });
+    return new Response("OK", { status: 200, headers: corsHeaders(request) });
   }
 
-  return new Response("Method not allowed", { status: 405, headers: corsHeaders() });
+  return new Response("Method not allowed", { status: 405, headers: corsHeaders(request) });
 }
 
-function corsHeaders() {
-  return {
-    "Access-Control-Allow-Origin": "*",
+function corsHeaders(request) {
+  const headers = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
     "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   };
+  const origin = request?.headers?.get("Origin");
+  if (origin && origin === new URL(request.url).origin) {
+    headers["Access-Control-Allow-Origin"] = origin;
+  }
+  return headers;
 }
