@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src * data:; connect-src 'self'; base-uri 'none'; form-action 'none';">
 <title>Siphon — Browser Feed Reader</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -189,7 +190,7 @@
       <div class="feed-list" id="feedList"></div>
       <div class="feeds-footer"><button class="btn btn-small btn-ghost" onclick="refreshAll(true)">↻ Refresh all</button><button class="btn btn-small btn-ghost" onclick="exportOpml()">Export</button><button class="btn btn-small btn-ghost" onclick="document.getElementById('opmlImport').click()">Import</button><input type="file" id="opmlImport" accept=".opml,.xml,.txt" style="display:none" onchange="importOpml(event)"></div>
       <div class="sync-section"><div class="sync-row"><input type="password" class="sync-input" id="syncPhrase" placeholder="Sync passphrase…" spellcheck="false" autocomplete="off"><button class="btn btn-small btn-ghost" id="syncBtn" onclick="syncNow()">Sync</button></div><div class="sync-status" id="syncStatus"></div></div>
-      <div class="cors-note">Feeds are fetched via the built-in proxy. Falls back to corsproxy.io when opened locally.</div>
+      <div class="cors-note">Feeds are fetched via the built-in proxy.</div>
     </div>
     <div class="panel list-panel hidden-right" id="listPanel">
       <div class="list-header"><button class="btn-icon back-btn" onclick="showFeeds()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button><div class="list-header-title" id="listTitle">All Articles</div><div class="list-header-count" id="listCount"></div></div>
@@ -215,6 +216,8 @@ try{feeds=JSON.parse(localStorage.getItem('siphon_feeds')||'[]')}catch{feeds=[]}
 try{readSet=new Set(JSON.parse(localStorage.getItem('siphon_read')||'[]'))}catch{}
 try{hideRead=JSON.parse(localStorage.getItem('siphon_hideread')||'false')}catch{}
 try{knownSet=new Set(JSON.parse(localStorage.getItem('siphon_known')||'[]'))}catch{}
+let localTs=0;try{localTs=JSON.parse(localStorage.getItem('siphon_ts')||'0')}catch{}
+function saveTs(){localTs=Date.now();localStorage.setItem('siphon_ts',JSON.stringify(localTs))}
 
 function articleKey(a){return a.link||(a.title+'||'+a.feedUrl)}
 function isRead(a){return readSet.has(articleKey(a))}
@@ -247,12 +250,13 @@ function setCache(u,t,ic,items){try{localStorage.setItem(ck(u),JSON.stringify({t
 function delCache(u){try{localStorage.removeItem(ck(u))}catch{}}
 function getStaleCache(u){try{const r=localStorage.getItem(ck(u));return r?JSON.parse(r):null}catch{return null}}
 function pruneCache(){const e=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith('siphon_c_')){try{e.push({k,ts:JSON.parse(localStorage.getItem(k)).ts||0})}catch{e.push({k,ts:0})}}}e.sort((a,b)=>a.ts-b.ts);const n=Math.max(1,Math.floor(e.length/2));for(let i=0;i<n;i++)localStorage.removeItem(e[i].k)}
+function loadFromCache(){articles=[];feeds.forEach(f=>{const c=getStaleCache(f.url);if(c){f.title=c.t||f.title;f.icon=c.ic||f.icon;integrateItems(f.url,c.items,true)}})}
 
 // ═══════════════════════════════════════
 // FETCH & PARSE
 // ═══════════════════════════════════════
 const IS_LOCAL=location.protocol==='file:';
-const PROXIES=IS_LOCAL?[u=>u,u=>'https://corsproxy.io/?'+encodeURIComponent(u)]:[u=>'/proxy?url='+encodeURIComponent(u),u=>'https://corsproxy.io/?'+encodeURIComponent(u)];
+const PROXIES=IS_LOCAL?[u=>u]:[u=>'/proxy?url='+encodeURIComponent(u)];
 function isWide(){return innerWidth>=900}
 async function fetchCors(url){for(const p of PROXIES){try{const r=await fetch(p(url),{signal:AbortSignal.timeout(15000)});if(r.ok){const t=await r.text();if(t.includes('<')&&(t.includes('<rss')||t.includes('<feed')||t.includes('<channel')))return t}}catch{}}throw new Error('CORS blocked or network error')}
 function parseFeed(xml,feedUrl){
@@ -270,12 +274,40 @@ function parseFeed(xml,feedUrl){
 // ═══════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════
-function stripHtml(h){const d=document.createElement('div');d.innerHTML=h;return d.textContent||''}
+function stripHtml(h){if(!h)return '';return h.replace(/<br\s*\/?>/gi,' ').replace(/<\/p>/gi,' ').replace(/<[^>]*>/g,'').replace(/&nbsp;/gi,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&#x27;/g,"'").replace(/&#x2F;/g,'/').replace(/\s+/g,' ').trim()}
 function fmtDate(s){if(!s)return '';try{const d=new Date(s);if(isNaN(d))return s;const now=new Date(),diff=now-d;if(diff<3600000)return Math.floor(diff/60000)+'m ago';if(diff<86400000)return Math.floor(diff/3600000)+'h ago';if(diff<604800000)return Math.floor(diff/86400000)+'d ago';return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:d.getFullYear()!==now.getFullYear()?'numeric':undefined})}catch{return s}}
 function sortT(s){try{return new Date(s).getTime()||0}catch{return 0}}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 function escX(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
-function sanitize(h){if(!h)return '';const d=document.createElement('div');d.innerHTML=h;d.querySelectorAll('script,style,iframe,object,embed,form').forEach(e=>e.remove());d.querySelectorAll('img').forEach(img=>{img.setAttribute('referrerpolicy','no-referrer');if(!IS_LOCAL){const src=img.getAttribute('src');if(src&&src.startsWith('http')){img.dataset.original=src;img.setAttribute('onerror','if(!this.dataset.proxied){this.dataset.proxied=1;this.src="/proxy?url="+encodeURIComponent(this.dataset.original)}')}}});d.querySelectorAll('a').forEach(a=>{a.setAttribute('target','_blank');a.setAttribute('rel','noopener')});return d.innerHTML}
+function sanitize(h){
+  if(!h)return '';
+  const ALLOWED=new Set(['p','div','span','a','img','br','hr','ul','ol','li','blockquote','pre','code','h1','h2','h3','h4','h5','h6','em','strong','b','i','u','s','sub','sup','table','thead','tbody','tr','td','th','figure','figcaption','picture','source','dl','dt','dd','details','summary']);
+  const DANGEROUS=new Set(['script','style','iframe','object','embed','form','svg','math','base','meta','link','template','noscript','textarea','select','input','button']);
+  const ATTR_ALLOW={a:new Set(['href']),img:new Set(['src','alt','width','height']),td:new Set(['colspan','rowspan']),th:new Set(['colspan','rowspan']),source:new Set(['srcset','media','type'])};
+  const BAD_SCHEME=/^\s*(javascript|data|vbscript|blob)\s*:/i;
+  const d=document.createElement('div');d.innerHTML=h;
+  function walk(parent){
+    const children=Array.from(parent.childNodes);
+    for(const node of children){
+      if(node.nodeType===Node.COMMENT_NODE){parent.removeChild(node);continue}
+      if(node.nodeType===Node.TEXT_NODE)continue;
+      if(node.nodeType!==Node.ELEMENT_NODE){parent.removeChild(node);continue}
+      const tag=node.tagName.toLowerCase();
+      if(DANGEROUS.has(tag)){parent.removeChild(node);continue}
+      if(!ALLOWED.has(tag)){walk(node);while(node.firstChild)parent.insertBefore(node.firstChild,node);parent.removeChild(node);continue}
+      const allowed=ATTR_ALLOW[tag]||new Set();
+      for(const attr of Array.from(node.attributes)){
+        const n=attr.name.toLowerCase();
+        if(n.startsWith('on')||!allowed.has(n))node.removeAttribute(attr.name);
+      }
+      if(tag==='a'){const href=node.getAttribute('href');if(href&&BAD_SCHEME.test(href))node.removeAttribute('href');node.setAttribute('target','_blank');node.setAttribute('rel','noopener noreferrer')}
+      if(tag==='img'){const src=node.getAttribute('src');if(src&&BAD_SCHEME.test(src))node.removeAttribute('src');node.setAttribute('referrerpolicy','no-referrer');if(!IS_LOCAL){const imgSrc=node.getAttribute('src');if(imgSrc&&imgSrc.startsWith('http')){node.dataset.original=imgSrc;node.setAttribute('onerror','if(!this.dataset.proxied){this.dataset.proxied=1;this.src="/proxy?url="+encodeURIComponent(this.dataset.original)}')}}}
+      if(tag==='source'){const srcset=node.getAttribute('srcset');if(srcset&&BAD_SCHEME.test(srcset))node.removeAttribute('srcset')}
+      walk(node);
+    }
+  }
+  walk(d);return d.innerHTML;
+}
 function setLoading(on){isLoading=on;document.getElementById('globalLoading').style.display=on?'flex':'none'}
 function hostOf(u){try{return new URL(u).hostname.replace(/^www\./,'')}catch{return u}}
 
@@ -352,7 +384,18 @@ async function refreshAll(forceNet){
   const ps=feeds.map(async f=>{await refreshOneFeed(f.url,!!forceNet);if(gen!==refreshGen)return;done++;updStatus(done,total);schedRender()});
   await Promise.allSettled(ps);if(gen!==refreshGen)return;
   if(renderTimer){clearTimeout(renderTimer);renderTimer=null}
-  saveFeeds();saveKnown();cFiltered=null;renderFeedList();renderArticleList();setLoading(false);updStatus(-1,0);scheduleAuto();
+  saveFeeds();saveKnown();saveTs();cFiltered=null;renderFeedList();renderArticleList();setLoading(false);updStatus(-1,0);scheduleAuto();
+}
+
+async function refreshStale(){
+  const stale=feeds.filter(f=>!getCache(f.url));
+  if(stale.length===0){scheduleAuto();return}
+  const gen=++refreshGen;setLoading(true);let done=0;const total=stale.length;updStatus(0,total);
+  function schedRender(){if(renderTimer)return;renderTimer=setTimeout(()=>{renderTimer=null;if(gen!==refreshGen)return;cFiltered=null;renderFeedList();renderArticleList()},200)}
+  const ps=stale.map(async f=>{await refreshOneFeed(f.url,true);if(gen!==refreshGen)return;done++;updStatus(done,total);schedRender()});
+  await Promise.allSettled(ps);if(gen!==refreshGen)return;
+  if(renderTimer){clearTimeout(renderTimer);renderTimer=null}
+  saveFeeds();saveKnown();saveTs();cFiltered=null;renderFeedList();renderArticleList();setLoading(false);updStatus(-1,0);scheduleAuto();
 }
 
 async function refreshSingleFeed(feedUrl,e){
@@ -560,7 +603,7 @@ function renderOpenArticle(){
 // ═══════════════════════════════════════
 // SYNC
 // ═══════════════════════════════════════
-async function hashPhrase(p){const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(p));return[...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('')}
+async function hashPhrase(p){const enc=new TextEncoder();const km=await crypto.subtle.importKey('raw',enc.encode(p),'PBKDF2',false,['deriveBits']);const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:enc.encode('siphon-feed-reader-sync-v2'),iterations:600000,hash:'SHA-256'},km,256);return[...new Uint8Array(bits)].map(b=>b.toString(16).padStart(2,'0')).join('')}
 function getSyncPhrase(){return(localStorage.getItem('siphon_sync_phrase')||'').trim()}
 function saveSyncPhrase(p){localStorage.setItem('siphon_sync_phrase',p.trim())}
 function syncStatusMsg(msg){const el=document.getElementById('syncStatus');if(el)el.textContent=msg}
@@ -604,13 +647,36 @@ async function syncNow(){
     saveFeeds();saveRead();saveKnown();localStorage.setItem('siphon_hideread',JSON.stringify(hideRead));
     document.getElementById('hideReadToggle').classList.toggle('on',hideRead);
     cFiltered=null;renderFeedList();renderArticleList();
-    await syncPush(key,merged);
+    await syncPush(key,merged);saveTs();
     syncStatusMsg('Synced '+new Date().toLocaleTimeString());
   }catch(e){syncStatusMsg('Sync error: '+e.message)}
 }
 async function autoSync(){
   const phrase=getSyncPhrase();if(!phrase)return;
-  try{const key=await hashPhrase(phrase);const local={feeds,read:[...readSet],known:[...knownSet],hideRead,ts:Date.now()};const remote=await syncPull(key);const merged=remote?mergeSyncData(local,remote):local;feeds=merged.feeds;readSet=new Set(merged.read);knownSet=new Set(merged.known);hideRead=merged.hideRead;saveFeeds();saveRead();saveKnown();localStorage.setItem('siphon_hideread',JSON.stringify(hideRead));document.getElementById('hideReadToggle').classList.toggle('on',hideRead);cFiltered=null;renderFeedList();renderArticleList();await syncPush(key,merged);syncStatusMsg('Synced '+new Date().toLocaleTimeString())}catch{}
+  try{const key=await hashPhrase(phrase);const local={feeds,read:[...readSet],known:[...knownSet],hideRead,ts:Date.now()};const remote=await syncPull(key);const merged=remote?mergeSyncData(local,remote):local;feeds=merged.feeds;readSet=new Set(merged.read);knownSet=new Set(merged.known);hideRead=merged.hideRead;saveFeeds();saveRead();saveKnown();localStorage.setItem('siphon_hideread',JSON.stringify(hideRead));document.getElementById('hideReadToggle').classList.toggle('on',hideRead);cFiltered=null;renderFeedList();renderArticleList();await syncPush(key,merged);saveTs();syncStatusMsg('Synced '+new Date().toLocaleTimeString())}catch(e){syncStatusMsg('Auto-sync error: '+(e.message||'unknown'))}
+}
+
+async function initSync(){
+  const phrase=getSyncPhrase();
+  if(phrase){
+    try{
+      syncStatusMsg('Syncing…');
+      const key=await hashPhrase(phrase);
+      const remote=await syncPull(key);
+      if(remote&&(remote.ts||0)>localTs){
+        const local={feeds,read:[...readSet],known:[...knownSet],hideRead,ts:localTs};
+        const merged=mergeSyncData(local,remote);
+        feeds=merged.feeds;readSet=new Set(merged.read);knownSet=new Set(merged.known);hideRead=merged.hideRead;
+        saveFeeds();saveRead();saveKnown();localStorage.setItem('siphon_hideread',JSON.stringify(hideRead));
+        document.getElementById('hideReadToggle').classList.toggle('on',hideRead);
+        loadFromCache();cFiltered=null;renderFeedList();renderArticleList();
+      }
+      const pushData={feeds,read:[...readSet],known:[...knownSet],hideRead,ts:Date.now()};
+      await syncPush(key,pushData);saveTs();
+      syncStatusMsg('Synced '+new Date().toLocaleTimeString());
+    }catch(e){syncStatusMsg('Sync error: '+(e.message||'unknown'))}
+  }
+  await refreshStale();
 }
 
 // ═══════════════════════════════════════
@@ -621,7 +687,7 @@ document.getElementById('hideReadToggle').classList.toggle('on',hideRead);
 document.getElementById('syncPhrase').value=getSyncPhrase();
 if(getSyncPhrase())syncStatusMsg('Passphrase saved. Will sync on refresh.');
 renderFeedList();
-if(feeds.length>0){selectFeed(null);refreshAll(false).then(autoSync)}else{navigate('feeds');autoSync()}
+if(feeds.length>0){selectFeed(null);loadFromCache();cFiltered=null;renderFeedList();renderArticleList();initSync()}else{navigate('feeds');initSync()}
 </script>
 </body>
 </html>

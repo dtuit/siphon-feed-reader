@@ -14,6 +14,94 @@ export default {
   },
 };
 
+function isPrivateIPv4(host) {
+  // Block single hex integer (e.g., 0x7f000001 = 127.0.0.1)
+  if (/^0x[0-9a-f]+$/i.test(host)) return true;
+  // Block single decimal integer (e.g., 2130706433 = 127.0.0.1)
+  if (/^[0-9]+$/.test(host)) {
+    const n = parseInt(host, 10);
+    if (n >= 0 && n <= 0xffffffff) return true;
+  }
+
+  const parts = host.split(".");
+  if (parts.length !== 4) return false;
+
+  // Reject octal (leading zero) or hex notation in any octet
+  for (const p of parts) {
+    if (/^0x/i.test(p)) return true;
+    if (p.length > 1 && p.startsWith("0") && /^\d+$/.test(p)) return true;
+  }
+
+  const octets = parts.map((p) => parseInt(p, 10));
+  if (octets.some((o) => isNaN(o) || o < 0 || o > 255)) return false;
+
+  const [a, b] = octets;
+  if (a === 0) return true; // 0.0.0.0/8
+  if (a === 10) return true; // 10.0.0.0/8
+  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 CGNAT
+  if (a === 127) return true; // 127.0.0.0/8
+  if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local + metadata
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16
+  if (a >= 224) return true; // 224.0.0.0+ multicast + reserved
+
+  return false;
+}
+
+function isPrivateHostname(hostname) {
+  const h = hostname.toLowerCase();
+
+  const blockedHosts = [
+    "localhost",
+    "0.0.0.0",
+    "[::1]",
+    "[::]",
+    "metadata.google.internal",
+    "metadata.internal",
+    "instance-data",
+  ];
+  if (blockedHosts.includes(h)) return true;
+
+  if (h.endsWith(".local") || h.endsWith(".internal") || h.endsWith(".localhost")) return true;
+
+  // Strip IPv6 brackets for numeric checks
+  const bare = h.startsWith("[") && h.endsWith("]") ? h.slice(1, -1) : h;
+
+  // IPv4-mapped IPv6 like ::ffff:127.0.0.1
+  const mappedV4 = bare.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
+  if (mappedV4) return isPrivateIPv4(mappedV4[1]);
+
+  // Hex-encoded IPv4-mapped IPv6 like ::ffff:7f00:0001
+  const mappedHex = bare.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  if (mappedHex) {
+    const hi = parseInt(mappedHex[1], 16);
+    const lo = parseInt(mappedHex[2], 16);
+    const ipStr =
+      ((hi >> 8) & 0xff) + "." + (hi & 0xff) + "." + ((lo >> 8) & 0xff) + "." + (lo & 0xff);
+    return isPrivateIPv4(ipStr);
+  }
+
+  // IPv6 private ranges
+  if (/^fe80:/i.test(bare)) return true; // fe80::/10 link-local
+  if (/^f[cd][0-9a-f]{2}:/i.test(bare)) return true; // fc00::/7 unique local
+  if (bare === "::" || bare === "::1") return true;
+
+  return isPrivateIPv4(bare);
+}
+
+const MAX_REDIRECTS = 5;
+const MAX_RESPONSE_SIZE = 5 * 1024 * 1024; // 5 MB
+const ALLOWED_CONTENT_TYPES = [
+  "text/xml",
+  "application/xml",
+  "application/rss+xml",
+  "application/atom+xml",
+  "text/html",
+  "text/plain",
+  "application/xhtml+xml",
+  "application/json",
+];
+
 async function handleProxy(request, url) {
   if (request.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders() });
@@ -35,42 +123,104 @@ async function handleProxy(request, url) {
     return new Response("Only HTTP(S) URLs are allowed", { status: 400 });
   }
 
-  const hostname = parsed.hostname;
-  if (
-    hostname === "localhost" ||
-    hostname.endsWith(".local") ||
-    hostname.startsWith("127.") ||
-    hostname.startsWith("10.") ||
-    hostname.startsWith("192.168.") ||
-    hostname === "0.0.0.0" ||
-    hostname === "[::1]"
-  ) {
+  if (isPrivateHostname(parsed.hostname)) {
     return new Response("Requests to private networks are not allowed", {
       status: 403,
     });
   }
 
   try {
-    const resp = await fetch(target, {
-      headers: {
-        "User-Agent": "Siphon-Feed-Reader/1.0",
-        Accept:
-          "application/rss+xml, application/atom+xml, application/xml, text/xml",
-      },
-      redirect: "follow",
-    });
+    let currentUrl = target;
 
-    const body = await resp.arrayBuffer();
+    for (let i = 0; i <= MAX_REDIRECTS; i++) {
+      const resp = await fetch(currentUrl, {
+        headers: {
+          "User-Agent": "Siphon-Feed-Reader/1.0",
+          Accept:
+            "application/rss+xml, application/atom+xml, application/xml, text/xml",
+        },
+        redirect: "manual",
+      });
 
-    return new Response(body, {
-      status: resp.status,
-      headers: {
-        ...corsHeaders(),
-        "Content-Type": resp.headers.get("Content-Type") || "text/xml",
-      },
+      // Handle redirects manually — re-validate hostname at each hop
+      if ([301, 302, 303, 307, 308].includes(resp.status)) {
+        const location = resp.headers.get("Location");
+        if (!location) {
+          return new Response("Redirect with no Location header", {
+            status: 502,
+            headers: corsHeaders(),
+          });
+        }
+
+        let redirectParsed;
+        try {
+          redirectParsed = new URL(location, currentUrl);
+        } catch {
+          return new Response("Invalid redirect URL", {
+            status: 502,
+            headers: corsHeaders(),
+          });
+        }
+
+        if (!["http:", "https:"].includes(redirectParsed.protocol)) {
+          return new Response("Redirect to non-HTTP protocol blocked", {
+            status: 403,
+            headers: corsHeaders(),
+          });
+        }
+
+        if (isPrivateHostname(redirectParsed.hostname)) {
+          return new Response("Redirect to private network blocked", {
+            status: 403,
+            headers: corsHeaders(),
+          });
+        }
+
+        currentUrl = redirectParsed.href;
+        continue;
+      }
+
+      // Content-Type validation
+      const ct = (resp.headers.get("Content-Type") || "").toLowerCase();
+      if (ct && !ALLOWED_CONTENT_TYPES.some((t) => ct.includes(t))) {
+        return new Response("Unexpected content type", {
+          status: 403,
+          headers: corsHeaders(),
+        });
+      }
+
+      // Response size limit
+      const contentLength = resp.headers.get("Content-Length");
+      if (contentLength && parseInt(contentLength) > MAX_RESPONSE_SIZE) {
+        return new Response("Response too large", {
+          status: 413,
+          headers: corsHeaders(),
+        });
+      }
+
+      const body = await resp.arrayBuffer();
+      if (body.byteLength > MAX_RESPONSE_SIZE) {
+        return new Response("Response too large", {
+          status: 413,
+          headers: corsHeaders(),
+        });
+      }
+
+      return new Response(body, {
+        status: resp.status,
+        headers: {
+          ...corsHeaders(),
+          "Content-Type": resp.headers.get("Content-Type") || "text/xml",
+        },
+      });
+    }
+
+    return new Response("Too many redirects", {
+      status: 502,
+      headers: corsHeaders(),
     });
-  } catch (err) {
-    return new Response("Fetch failed: " + err.message, {
+  } catch {
+    return new Response("Fetch failed: unable to retrieve the requested resource", {
       status: 502,
       headers: corsHeaders(),
     });
