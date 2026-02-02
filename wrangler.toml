@@ -1,0 +1,12 @@
+name = "siphon-feed-reader"
+main = "worker.js"
+compatibility_date = "2026-02-02"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/proxy", "/sync"]
+
+[[kv_namespaces]]
+binding = "SYNC_KV"
+id = "269e169ed795488c98cf5e624424cfba"

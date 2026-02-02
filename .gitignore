@@ -9,5 +9,8 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Node (in case tooling is added later)
+# Node
 node_modules/
+
+# Wrangler
+.wrangler/
