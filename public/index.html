@@ -193,12 +193,12 @@
       <div class="cors-note">Feeds are fetched via the built-in proxy.</div>
     </div>
     <div class="panel list-panel hidden-right" id="listPanel">
-      <div class="list-header"><button class="btn-icon back-btn" onclick="showFeeds()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button><div class="list-header-title" id="listTitle">All Articles</div><div class="list-header-count" id="listCount"></div></div>
-      <div class="toggle-row"><label class="toggle-label" onclick="toggleHideRead()">Hide read</label><span class="unread-count-badge" id="unreadBadge"></span><div class="toggle-switch" id="hideReadToggle" onclick="toggleHideRead()"></div></div>
+      <div class="list-header"><button class="btn-icon back-btn" onclick="history.back()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button><div class="list-header-title" id="listTitle">All Articles</div><div class="list-header-count" id="listCount"></div></div>
+      <div class="toggle-row"><label class="toggle-label" onclick="toggleHideRead()">Hide read</label><span class="unread-count-badge" id="unreadBadge"></span><div class="toggle-switch" id="hideReadToggle" onclick="toggleHideRead()"></div><div style="flex:1"></div><button class="btn btn-small btn-ghost" onclick="markAllRead()">Mark all read</button></div>
       <div class="article-list" id="articleList"></div>
     </div>
     <div class="panel reader-panel hidden-right" id="readerPanel">
-      <div class="reader-header"><button class="btn-icon back-btn" onclick="showList()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button><span class="loading-text" id="readerHeaderLabel" style="flex:1">Reading</span><button class="btn-icon" onclick="closeReader()" title="Close article"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+      <div class="reader-header"><button class="btn-icon back-btn" onclick="history.back()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button><span class="loading-text" id="readerHeaderLabel" style="flex:1">Reading</span><button class="btn-icon" onclick="history.back()" title="Close article"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
       <div class="reader-scroll" id="readerScroll"><div class="state-message"><div class="state-title">Select an article</div><div class="state-desc">Pick something from the list to read it here.</div></div></div>
     </div>
   </div>
@@ -217,18 +217,31 @@ try{readSet=new Set(JSON.parse(localStorage.getItem('siphon_read')||'[]'))}catch
 try{hideRead=JSON.parse(localStorage.getItem('siphon_hideread')||'false')}catch{}
 try{knownSet=new Set(JSON.parse(localStorage.getItem('siphon_known')||'[]'))}catch{}
 let localTs=0;try{localTs=JSON.parse(localStorage.getItem('siphon_ts')||'0')}catch{}
+let feedFetchTs={};try{feedFetchTs=JSON.parse(localStorage.getItem('siphon_fetch_ts')||'{}')}catch{}
+function saveFetchTs(){try{localStorage.setItem('siphon_fetch_ts',JSON.stringify(feedFetchTs))}catch{}}
 function saveTs(){localTs=Date.now();localStorage.setItem('siphon_ts',JSON.stringify(localTs))}
 
 function articleKey(a){return a.link||(a.title+'||'+a.feedUrl)}
 function isRead(a){return readSet.has(articleKey(a))}
 function isNew(a){return newSet.has(articleKey(a))}
-function markRead(a){const k=articleKey(a);if(readSet.has(k))return;readSet.add(k);newSet.delete(k);saveRead()}
-function markUnread(a){readSet.delete(articleKey(a));saveRead()}
+function markRead(a){const k=articleKey(a);if(readSet.has(k))return;readSet.add(k);newSet.delete(k);saveRead();deferSync()}
+function markUnread(a){readSet.delete(articleKey(a));saveRead();deferSync()}
 function saveRead(){const a=[...readSet];if(a.length>5000)readSet=new Set(a.slice(-5000));localStorage.setItem('siphon_read',JSON.stringify([...readSet]))}
 function saveKnown(){const a=[...knownSet];if(a.length>10000)knownSet=new Set(a.slice(-10000));localStorage.setItem('siphon_known',JSON.stringify([...knownSet]))}
 function saveFeeds(){localStorage.setItem('siphon_feeds',JSON.stringify(feeds))}
 
-function toggleHideRead(){hideRead=!hideRead;localStorage.setItem('siphon_hideread',JSON.stringify(hideRead));document.getElementById('hideReadToggle').classList.toggle('on',hideRead);exemptKey=null;cFiltered=null;renderArticleList()}
+function toggleHideRead(){hideRead=!hideRead;localStorage.setItem('siphon_hideread',JSON.stringify(hideRead));document.getElementById('hideReadToggle').classList.toggle('on',hideRead);exemptKey=null;cFiltered=null;renderArticleList();deferSync()}
+
+function markAllRead(){
+  const src=activeFeedUrl?articles.filter(a=>a.feedUrl===activeFeedUrl):articles;
+  src.forEach(a=>{markRead(a)});
+  exemptKey=null;cFiltered=null;renderArticleList();renderFeedList();
+}
+function markAllReadFeed(url,e){
+  if(e)e.stopPropagation();openMenuId=null;
+  articles.filter(a=>a.feedUrl===url).forEach(a=>{markRead(a)});
+  cFiltered=null;renderArticleList();renderFeedList();
+}
 
 function toggleReadRow(idx,e){
   e.stopPropagation();const f=getFiltered();if(idx<0||idx>=f.length)return;const a=f[idx];
@@ -242,15 +255,16 @@ function toggleReadInReader(){
 }
 
 // ═══════════════════════════════════════
-// FEED CACHE
+// FEED CACHE (IndexedDB)
 // ═══════════════════════════════════════
-function ck(u){return 'siphon_c_'+u}
-function getCache(u){try{const r=localStorage.getItem(ck(u));if(!r)return null;const d=JSON.parse(r);return(Date.now()-d.ts>CACHE_MAX_AGE)?null:d}catch{return null}}
-function setCache(u,t,ic,items){try{localStorage.setItem(ck(u),JSON.stringify({ts:Date.now(),t,ic,items}))}catch{pruneCache();try{localStorage.setItem(ck(u),JSON.stringify({ts:Date.now(),t,ic,items}))}catch{}}}
-function delCache(u){try{localStorage.removeItem(ck(u))}catch{}}
-function getStaleCache(u){try{const r=localStorage.getItem(ck(u));return r?JSON.parse(r):null}catch{return null}}
-function pruneCache(){const e=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith('siphon_c_')){try{e.push({k,ts:JSON.parse(localStorage.getItem(k)).ts||0})}catch{e.push({k,ts:0})}}}e.sort((a,b)=>a.ts-b.ts);const n=Math.max(1,Math.floor(e.length/2));for(let i=0;i<n;i++)localStorage.removeItem(e[i].k)}
-function loadFromCache(){articles=[];feeds.forEach(f=>{const c=getStaleCache(f.url);if(c){f.title=c.t||f.title;f.icon=c.ic||f.icon;integrateItems(f.url,c.items,true)}})}
+let cacheDB=null;
+function openCacheDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open('siphon_cache',1);req.onupgradeneeded=e=>{e.target.result.createObjectStore('feeds')};req.onsuccess=e=>{cacheDB=e.target.result;resolve(cacheDB)};req.onerror=e=>reject(e.target.error)})}
+async function migrateCache(){const keys=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith('siphon_c_'))keys.push(k)}if(!keys.length)return;const tx=cacheDB.transaction('feeds','readwrite');const s=tx.objectStore('feeds');keys.forEach(k=>{try{const d=JSON.parse(localStorage.getItem(k));s.put(d,k.slice(9));localStorage.removeItem(k)}catch{localStorage.removeItem(k)}});await new Promise(r=>{tx.oncomplete=r;tx.onerror=r})}
+async function getCache(u){try{if(!cacheDB)return null;const d=await new Promise(r=>{const q=cacheDB.transaction('feeds','readonly').objectStore('feeds').get(u);q.onsuccess=()=>r(q.result||null);q.onerror=()=>r(null)});return d&&(Date.now()-d.ts<=CACHE_MAX_AGE)?d:null}catch{return null}}
+async function setCache(u,t,ic,items,np){try{if(!cacheDB)return;await new Promise(r=>{const tx=cacheDB.transaction('feeds','readwrite');tx.objectStore('feeds').put({ts:Date.now(),t,ic,items,np:np||null},u);tx.oncomplete=()=>r();tx.onerror=()=>r()})}catch{}}
+async function delCache(u){try{if(!cacheDB)return;const tx=cacheDB.transaction('feeds','readwrite');tx.objectStore('feeds').delete(u)}catch{}}
+async function getStaleCache(u){try{if(!cacheDB)return null;return new Promise(r=>{const q=cacheDB.transaction('feeds','readonly').objectStore('feeds').get(u);q.onsuccess=()=>r(q.result||null);q.onerror=()=>r(null)})}catch{return null}}
+async function loadFromCache(){articles=[];await Promise.all(feeds.map(async f=>{const c=await getStaleCache(f.url);if(c){f.title=c.t||f.title;f.icon=c.ic||f.icon;f.nextPageUrl=c.np||null;integrateItems(f.url,c.items,true)}}))}
 
 // ═══════════════════════════════════════
 // FETCH & PARSE
@@ -261,14 +275,16 @@ function isWide(){return innerWidth>=900}
 async function fetchCors(url){for(const p of PROXIES){try{const r=await fetch(p(url),{signal:AbortSignal.timeout(15000)});if(r.ok){const t=await r.text();if(t.includes('<')&&(t.includes('<rss')||t.includes('<feed')||t.includes('<channel')))return t}}catch{}}throw new Error('CORS blocked or network error')}
 function parseFeed(xml,feedUrl){
   const doc=new DOMParser().parseFromString(xml,'text/xml');if(doc.querySelector('parsererror'))throw new Error('Invalid XML');
-  const items=[];let feedTitle='',feedIcon='';
+  const items=[];let feedTitle='',feedIcon='',nextPageUrl=null;
   const ch=doc.querySelector('channel');
   if(ch){feedTitle=ch.querySelector(':scope>title')?.textContent?.trim()||feedUrl;feedIcon=ch.querySelector(':scope>image>url')?.textContent?.trim()||'';
-    ch.querySelectorAll('item').forEach(item=>{items.push({title:item.querySelector('title')?.textContent?.trim()||'Untitled',link:item.querySelector('link')?.textContent?.trim()||'',description:item.querySelector('description')?.textContent?.trim()||'',content:item.querySelector('content\\:encoded,encoded')?.textContent?.trim()||item.querySelector('description')?.textContent?.trim()||'',pubDate:item.querySelector('pubDate')?.textContent?.trim()||item.querySelector('date')?.textContent?.trim()||'',author:item.querySelector('author')?.textContent?.trim()||item.querySelector('dc\\:creator,creator')?.textContent?.trim()||'',feedUrl,feedTitle})})}
+    ch.querySelectorAll('item').forEach(item=>{items.push({title:item.querySelector('title')?.textContent?.trim()||'Untitled',link:item.querySelector('link')?.textContent?.trim()||'',description:item.querySelector('description')?.textContent?.trim()||'',content:item.querySelector('content\\:encoded,encoded')?.textContent?.trim()||item.querySelector('description')?.textContent?.trim()||'',pubDate:item.querySelector('pubDate')?.textContent?.trim()||item.querySelector('date')?.textContent?.trim()||'',author:item.querySelector('author')?.textContent?.trim()||item.querySelector('dc\\:creator,creator')?.textContent?.trim()||'',feedUrl,feedTitle})});
+    ch.querySelectorAll('link').forEach(lk=>{if(lk.getAttribute('rel')==='next'&&lk.getAttribute('href')){try{nextPageUrl=new URL(lk.getAttribute('href'),feedUrl).href}catch{}}})}
   const af=doc.querySelector('feed');
   if(!ch&&af){feedTitle=af.querySelector(':scope>title')?.textContent?.trim()||feedUrl;feedIcon=af.querySelector(':scope>icon')?.textContent?.trim()||'';
-    af.querySelectorAll('entry').forEach(e=>{const lk=e.querySelector('link[rel="alternate"],link:not([rel])');items.push({title:e.querySelector('title')?.textContent?.trim()||'Untitled',link:lk?.getAttribute('href')||'',description:e.querySelector('summary')?.textContent?.trim()||'',content:e.querySelector('content')?.textContent?.trim()||e.querySelector('summary')?.textContent?.trim()||'',pubDate:e.querySelector('published,updated')?.textContent?.trim()||'',author:e.querySelector('author>name')?.textContent?.trim()||'',feedUrl,feedTitle})})}
-  if(!ch&&!af)throw new Error('Not a valid RSS/Atom feed');return{feedTitle,feedIcon,items}
+    af.querySelectorAll('entry').forEach(e=>{const lk=e.querySelector('link[rel="alternate"],link:not([rel])');items.push({title:e.querySelector('title')?.textContent?.trim()||'Untitled',link:lk?.getAttribute('href')||'',description:e.querySelector('summary')?.textContent?.trim()||'',content:e.querySelector('content')?.textContent?.trim()||e.querySelector('summary')?.textContent?.trim()||'',pubDate:e.querySelector('published,updated')?.textContent?.trim()||'',author:e.querySelector('author>name')?.textContent?.trim()||'',feedUrl,feedTitle})});
+    const nl=af.querySelector(':scope>link[rel="next"]');if(nl&&nl.getAttribute('href')){try{nextPageUrl=new URL(nl.getAttribute('href'),feedUrl).href}catch{}}}
+  if(!ch&&!af)throw new Error('Not a valid RSS/Atom feed');return{feedTitle,feedIcon,items,nextPageUrl}
 }
 
 // ═══════════════════════════════════════
@@ -323,15 +339,17 @@ function getFiltered(){
 // ═══════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════
+let _navPush=false;
 function navigate(v){
-  currentView=v;const fp=document.getElementById('feedsPanel'),lp=document.getElementById('listPanel'),rp=document.getElementById('readerPanel'),ps=document.getElementById('panels');
+  const pv=currentView;currentView=v;if(_navPush&&pv!==v)history.pushState({view:v},'');
+  const fp=document.getElementById('feedsPanel'),lp=document.getElementById('listPanel'),rp=document.getElementById('readerPanel'),ps=document.getElementById('panels');
   if(isWide()){fp.classList.remove('hidden','hidden-right');if(activeArticleIdx>=0){ps.className='panels wide-has-reader';lp.classList.remove('hidden','hidden-right');rp.classList.remove('hidden','hidden-right')}else{ps.className='panels wide-no-reader';lp.classList.remove('hidden','hidden-right');rp.classList.add('hidden-right')}}
   else{ps.className='panels';fp.classList.toggle('hidden',v!=='feeds');fp.classList.remove('hidden-right');lp.classList.toggle('hidden',v==='feeds');lp.classList.toggle('hidden-right',v==='reader');rp.classList.toggle('hidden-right',v!=='reader');rp.classList.toggle('hidden',false);if(v!=='reader')rp.classList.add('hidden-right')}
   updBreadcrumb();
 }
 function showFeeds(){navigate('feeds')}
-function showList(){activeArticleIdx=-1;exemptKey=null;cFiltered=null;navigate('list');renderArticleList()}
-function closeReader(){activeArticleIdx=-1;exemptKey=null;cFiltered=null;renderArticleList();navigate('list')}
+function showList(){activeArticleIdx=-1;exemptKey=null;cFiltered=null;sessionStorage.setItem('siphon_view',JSON.stringify({feed:activeFeedUrl,article:null}));navigate('list');renderArticleList()}
+function closeReader(){activeArticleIdx=-1;exemptKey=null;cFiltered=null;sessionStorage.setItem('siphon_view',JSON.stringify({feed:activeFeedUrl,article:null}));renderArticleList();navigate('list')}
 function updBreadcrumb(){
   const el=document.getElementById('breadcrumb');let p=[];
   if(isWide()||currentView==='feeds')p=[];
@@ -348,16 +366,16 @@ async function addFeed(){
   let url=inp.value.trim();if(!url)return;if(!url.match(/^https?:\/\//))url='https://'+url;
   if(feeds.find(f=>f.url===url)){err.textContent='Already added.';return}
   err.textContent='';inp.disabled=true;btn.disabled=true;btn.textContent='…';setLoading(true);
-  try{const xml=await fetchCors(url);const{feedTitle,feedIcon,items}=parseFeed(xml,url);
-    feeds.push({url,title:feedTitle,icon:feedIcon});saveFeeds();setCache(url,feedTitle,feedIcon,items);
-    items.forEach(a=>knownSet.add(articleKey(a)));saveKnown();articles=articles.concat(items);cFiltered=null;inp.value='';renderFeedList();selectFeed(url);
+  try{const xml=await fetchCors(url);const{feedTitle,feedIcon,items,nextPageUrl}=parseFeed(xml,url);
+    feeds.push({url,title:feedTitle,icon:feedIcon,nextPageUrl:nextPageUrl||null});saveFeeds();await setCache(url,feedTitle,feedIcon,items,nextPageUrl);
+    items.forEach(a=>knownSet.add(articleKey(a)));saveKnown();articles=articles.concat(items);cFiltered=null;inp.value='';renderFeedList();selectFeed(url);deferSync();
   }catch(e){err.textContent=e.message||'Failed.'}
   finally{inp.disabled=false;btn.disabled=false;btn.textContent='Add';setLoading(false);inp.focus()}
 }
 document.getElementById('feedUrl').addEventListener('keydown',e=>{if(e.key==='Enter')addFeed()});
 
-function selectFeed(u){activeFeedUrl=u;activeArticleIdx=-1;exemptKey=null;cFiltered=null;renderFeedList();renderArticleList();navigate('list')}
-function removeFeed(u,e){e.stopPropagation();openMenuId=null;feeds=feeds.filter(f=>f.url!==u);saveFeeds();delCache(u);articles=articles.filter(a=>a.feedUrl!==u);if(activeFeedUrl===u)activeFeedUrl=null;activeArticleIdx=-1;cFiltered=null;renderFeedList();renderArticleList()}
+function selectFeed(u){activeFeedUrl=u;activeArticleIdx=-1;exemptKey=null;cFiltered=null;sessionStorage.setItem('siphon_view',JSON.stringify({feed:u,article:null}));renderFeedList();renderArticleList();navigate('list')}
+function removeFeed(u,e){e.stopPropagation();openMenuId=null;feeds=feeds.filter(f=>f.url!==u);saveFeeds();delCache(u);delete feedFetchTs[u];saveFetchTs();articles=articles.filter(a=>a.feedUrl!==u);if(activeFeedUrl===u)activeFeedUrl=null;activeArticleIdx=-1;cFiltered=null;renderFeedList();renderArticleList();deferSync()}
 
 // ═══════════════════════════════════════
 // REFRESH
@@ -372,10 +390,10 @@ function integrateItems(feedUrl,items,isInitial){
 
 async function refreshOneFeed(feedUrl,forceNet){
   const feed=feeds.find(f=>f.url===feedUrl);if(!feed)return 'skip';
-  if(!forceNet){const c=getCache(feedUrl);if(c){feed.title=c.t||feed.title;feed.icon=c.ic||feed.icon;integrateItems(feedUrl,c.items,true);return 'cached'}}
-  try{const xml=await fetchCors(feedUrl);const r=parseFeed(xml,feedUrl);feed.title=r.feedTitle||feed.title;feed.icon=r.feedIcon||feed.icon;
-    setCache(feedUrl,r.feedTitle,r.feedIcon,r.items);integrateItems(feedUrl,r.items,!forceNet);return 'fetched';
-  }catch{const c=getStaleCache(feedUrl);if(c){feed.title=c.t||feed.title;feed.icon=c.ic||feed.icon;integrateItems(feedUrl,c.items,true);return 'stale'}return 'failed'}
+  if(!forceNet){const c=await getCache(feedUrl);if(c){feed.title=c.t||feed.title;feed.icon=c.ic||feed.icon;feed.nextPageUrl=c.np||null;integrateItems(feedUrl,c.items,true);return 'cached'}}
+  try{const xml=await fetchCors(feedUrl);const r=parseFeed(xml,feedUrl);feed.title=r.feedTitle||feed.title;feed.icon=r.feedIcon||feed.icon;feed.nextPageUrl=r.nextPageUrl||null;
+    await setCache(feedUrl,r.feedTitle,r.feedIcon,r.items,r.nextPageUrl);feedFetchTs[feedUrl]=Date.now();saveFetchTs();integrateItems(feedUrl,r.items,!forceNet);return 'fetched';
+  }catch{feedFetchTs[feedUrl]=Date.now();saveFetchTs();const c=await getStaleCache(feedUrl);if(c){feed.title=c.t||feed.title;feed.icon=c.ic||feed.icon;feed.nextPageUrl=c.np||null;integrateItems(feedUrl,c.items,true);return 'stale'}return 'failed'}
 }
 
 async function refreshAll(forceNet){
@@ -388,7 +406,7 @@ async function refreshAll(forceNet){
 }
 
 async function refreshStale(){
-  const stale=feeds.filter(f=>!getCache(f.url));
+  const stale=feeds.filter(f=>Date.now()-(feedFetchTs[f.url]||0)>CACHE_MAX_AGE);
   if(stale.length===0){scheduleAuto();return}
   const gen=++refreshGen;setLoading(true);let done=0;const total=stale.length;updStatus(0,total);
   function schedRender(){if(renderTimer)return;renderTimer=setTimeout(()=>{renderTimer=null;if(gen!==refreshGen)return;cFiltered=null;renderFeedList();renderArticleList()},200)}
@@ -406,6 +424,40 @@ async function refreshSingleFeed(feedUrl,e){
 function updStatus(d,t){const el=document.getElementById('globalLoading');if(d<0){el.style.display='none';return}el.style.display='flex';el.innerHTML='<div class="spinner"></div><span class="loading-text">'+d+'/'+t+'</span>'}
 
 // ═══════════════════════════════════════
+// PAGINATION
+// ═══════════════════════════════════════
+const MAX_ITEMS_PER_FEED=500;
+let loadingOlder=false;
+async function loadNextPage(feedUrl){
+  const feed=feeds.find(f=>f.url===feedUrl);if(!feed||!feed.nextPageUrl)return;
+  const visitedPages=(feed._visitedPages instanceof Set)?feed._visitedPages:(feed._visitedPages=new Set());
+  if(visitedPages.has(feed.nextPageUrl))return;
+  visitedPages.add(feed.nextPageUrl);
+  try{
+    const xml=await fetchCors(feed.nextPageUrl);const r=parseFeed(xml,feedUrl);
+    const existingKeys=new Set(articles.filter(a=>a.feedUrl===feedUrl).map(articleKey));
+    const newItems=r.items.filter(a=>!existingKeys.has(articleKey(a)));
+    newItems.forEach(a=>knownSet.add(articleKey(a)));
+    articles=articles.concat(newItems);
+    feed.nextPageUrl=r.nextPageUrl||null;
+    let allFeedItems=articles.filter(a=>a.feedUrl===feedUrl);
+    if(allFeedItems.length>MAX_ITEMS_PER_FEED){
+      allFeedItems.sort((a,b)=>sortT(b.pubDate)-sortT(a.pubDate));
+      const drop=new Set(allFeedItems.slice(MAX_ITEMS_PER_FEED).map(articleKey));
+      articles=articles.filter(a=>a.feedUrl!==feedUrl||!drop.has(articleKey(a)));
+      allFeedItems=allFeedItems.slice(0,MAX_ITEMS_PER_FEED);
+    }
+    await setCache(feedUrl,feed.title,feed.icon,allFeedItems,feed.nextPageUrl);saveKnown();
+    cFiltered=null;renderArticleList();renderFeedList();
+  }catch(e){console.error('Failed to load next page:',e)}
+}
+async function handleLoadOlder(){
+  if(loadingOlder||!activeFeedUrl)return;loadingOlder=true;
+  const btn=document.getElementById('loadOlderBtn');if(btn){btn.disabled=true;btn.textContent='Loading…'}
+  await loadNextPage(activeFeedUrl);loadingOlder=false;
+}
+
+// ═══════════════════════════════════════
 // AUTO-REFRESH
 // ═══════════════════════════════════════
 function scheduleAuto(){if(autoTimer)clearTimeout(autoTimer);if(countdownTimer)clearInterval(countdownTimer);nextRefreshAt=Date.now()+AUTO_REFRESH_MS;updCountdown();countdownTimer=setInterval(updCountdown,30000);autoTimer=setTimeout(()=>refreshAll(true).then(autoSync),AUTO_REFRESH_MS)}
@@ -415,7 +467,7 @@ function updCountdown(){const el=document.getElementById('nextRefreshLabel');con
 // OPML
 // ═══════════════════════════════════════
 function exportOpml(){let o='<?xml version="1.0" encoding="UTF-8"?>\n<opml version="2.0">\n<head><title>Siphon</title></head>\n<body>\n';feeds.forEach(f=>{o+='  <outline type="rss" text="'+escX(f.title)+'" xmlUrl="'+escX(f.url)+'" />\n'});o+='</body>\n</opml>';const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([o],{type:'application/xml'}));a.download='siphon-feeds.opml';a.click()}
-async function importOpml(ev){const file=ev.target.files[0];if(!file)return;const txt=await file.text();const doc=new DOMParser().parseFromString(txt,'text/xml');let c=0;doc.querySelectorAll('outline[xmlUrl]').forEach(o=>{const u=o.getAttribute('xmlUrl'),t=o.getAttribute('text')||o.getAttribute('title')||u;if(u&&!feeds.find(f=>f.url===u)){feeds.push({url:u,title:t,icon:''});c++}});saveFeeds();renderFeedList();if(c>0)refreshAll(true);ev.target.value=''}
+async function importOpml(ev){const file=ev.target.files[0];if(!file)return;const txt=await file.text();const doc=new DOMParser().parseFromString(txt,'text/xml');let c=0;doc.querySelectorAll('outline[xmlUrl]').forEach(o=>{const u=o.getAttribute('xmlUrl'),t=o.getAttribute('text')||o.getAttribute('title')||u;if(u&&!feeds.find(f=>f.url===u)){feeds.push({url:u,title:t,icon:''});c++}});saveFeeds();renderFeedList();if(c>0){refreshAll(true);deferSync()}ev.target.value=''}
 
 // ═══════════════════════════════════════
 // RENDER: FEED LIST
@@ -427,6 +479,7 @@ const starSvg='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" strok
 const starFillSvg='<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
 const upSvg='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>';
 const downSvg='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+const markReadSvg='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
 
 function getSortedFeeds(){
   return feeds.slice().sort((a,b)=>{
@@ -439,7 +492,7 @@ function getSortedFeeds(){
 function toggleFav(url,e){
   if(e)e.stopPropagation();openMenuId=null;
   const f=feeds.find(x=>x.url===url);if(f)f.fav=!f.fav;
-  saveFeeds();renderFeedList();
+  saveFeeds();renderFeedList();deferSync();
 }
 
 function moveFeed(url,dir,e){
@@ -447,7 +500,7 @@ function moveFeed(url,dir,e){
   const idx=feeds.findIndex(x=>x.url===url);if(idx<0)return;
   const ni=idx+dir;if(ni<0||ni>=feeds.length)return;
   [feeds[idx],feeds[ni]]=[feeds[ni],feeds[idx]];
-  saveFeeds();renderFeedList();
+  saveFeeds();renderFeedList();deferSync();
 }
 
 // Drag state
@@ -485,7 +538,7 @@ function onDrop(targetUrl,e){
   const mid=rect.top+rect.height/2;
   const insertIdx=e.clientY<mid?feeds.findIndex(f=>f.url===targetUrl):feeds.findIndex(f=>f.url===targetUrl)+1;
   feeds.splice(insertIdx<0?feeds.length:insertIdx,0,moved);
-  saveFeeds();renderFeedList();
+  saveFeeds();renderFeedList();deferSync();
   dragUrl=null;
 }
 
@@ -525,6 +578,7 @@ function renderFeedList(){
             +'<button class="feed-menu-item" onclick="toggleFav(\''+eu+'\',event)">'+(isFav?starFillSvg+' Unfavorite':starSvg+' Favorite')+'</button>'
             +'<button class="feed-menu-item" onclick="moveFeed(\''+eu+'\',-1,event)"'+(fidx===0?' disabled style="opacity:.3;pointer-events:none"':'')+'>'+upSvg+' Move up</button>'
             +'<button class="feed-menu-item" onclick="moveFeed(\''+eu+'\',1,event)"'+(fidx===feeds.length-1?' disabled style="opacity:.3;pointer-events:none"':'')+'>'+downSvg+' Move down</button>'
+            +'<button class="feed-menu-item" onclick="markAllReadFeed(\''+eu+'\',event)">'+markReadSvg+' Mark all read</button>'
             +'<button class="feed-menu-item" onclick="refreshSingleFeed(\''+eu+'\',event)">'+rSvg+' Refresh</button>'
             +'<button class="feed-menu-item danger" onclick="removeFeed(\''+eu+'\',event)">'+xSvg+' Remove</button>'
           +'</div>'
@@ -562,7 +616,9 @@ function renderArticleList(){
   document.getElementById('unreadBadge').textContent=af.filter(a=>!isRead(a)).length+' unread / '+af.length;
   te.textContent=activeFeedUrl?(feeds.find(x=>x.url===activeFeedUrl)?.title||'Feed'):'All Articles';ce.textContent=f.length+' shown';
   if(!f.length){lastRange=null;layout=[];le.innerHTML='<div class="state-message"><div class="state-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text-faint)" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/></svg></div><div class="state-title">'+(hideRead?'All caught up':'No articles')+'</div><div class="state-desc">'+(hideRead?'No unread articles. Toggle "Hide read" to see everything.':'Try refreshing, or the feed may be empty.')+'</div></div>';return}
-  const th=buildLayout(f);le.innerHTML='<div id="vs" style="height:'+th+'px;position:relative;"></div>';lastRange=null;
+  const th=buildLayout(f);const feed=activeFeedUrl?feeds.find(x=>x.url===activeFeedUrl):null;
+  const olderBtn=(feed&&feed.nextPageUrl)?'<div style="padding:16px;text-align:center;"><button class="btn btn-small btn-ghost" id="loadOlderBtn" onclick="handleLoadOlder()">Load older articles</button></div>':'';
+  le.innerHTML='<div id="vs" style="height:'+th+'px;position:relative;"></div>'+olderBtn;lastRange=null;
   le.removeEventListener('scroll',onScroll);le.addEventListener('scroll',onScroll);renderVisibleRows();
 }
 function onScroll(){renderVisibleRows()}
@@ -591,6 +647,7 @@ function renderVisibleRows(){
 function openArticle(idx){
   const f=getFiltered();if(idx<0||idx>=f.length)return;activeArticleIdx=idx;const a=f[idx];
   exemptKey=articleKey(a);markRead(a);newSet.delete(articleKey(a));cFiltered=null;
+  sessionStorage.setItem('siphon_view',JSON.stringify({feed:activeFeedUrl,article:articleKey(a)}));
   renderOpenArticle();lastRange=null;renderVisibleRows();renderFeedList();navigate('reader');
 }
 function renderOpenArticle(){
@@ -651,6 +708,8 @@ async function syncNow(){
     syncStatusMsg('Synced '+new Date().toLocaleTimeString());
   }catch(e){syncStatusMsg('Sync error: '+e.message)}
 }
+let deferSyncTimer=null;
+function deferSync(){if(!getSyncPhrase())return;if(deferSyncTimer)clearTimeout(deferSyncTimer);deferSyncTimer=setTimeout(()=>{deferSyncTimer=null;autoSync()},3000)}
 async function autoSync(){
   const phrase=getSyncPhrase();if(!phrase)return;
   try{const key=await hashPhrase(phrase);const local={feeds,read:[...readSet],known:[...knownSet],hideRead,ts:Date.now()};const remote=await syncPull(key);const merged=remote?mergeSyncData(local,remote):local;feeds=merged.feeds;readSet=new Set(merged.read);knownSet=new Set(merged.known);hideRead=merged.hideRead;saveFeeds();saveRead();saveKnown();localStorage.setItem('siphon_hideread',JSON.stringify(hideRead));document.getElementById('hideReadToggle').classList.toggle('on',hideRead);cFiltered=null;renderFeedList();renderArticleList();await syncPush(key,merged);saveTs();syncStatusMsg('Synced '+new Date().toLocaleTimeString())}catch(e){syncStatusMsg('Auto-sync error: '+(e.message||'unknown'))}
@@ -669,7 +728,7 @@ async function initSync(){
         feeds=merged.feeds;readSet=new Set(merged.read);knownSet=new Set(merged.known);hideRead=merged.hideRead;
         saveFeeds();saveRead();saveKnown();localStorage.setItem('siphon_hideread',JSON.stringify(hideRead));
         document.getElementById('hideReadToggle').classList.toggle('on',hideRead);
-        loadFromCache();cFiltered=null;renderFeedList();renderArticleList();
+        await loadFromCache();cFiltered=null;renderFeedList();renderArticleList();
       }
       const pushData={feeds,read:[...readSet],known:[...knownSet],hideRead,ts:Date.now()};
       await syncPush(key,pushData);saveTs();
@@ -687,7 +746,13 @@ document.getElementById('hideReadToggle').classList.toggle('on',hideRead);
 document.getElementById('syncPhrase').value=getSyncPhrase();
 if(getSyncPhrase())syncStatusMsg('Passphrase saved. Will sync on refresh.');
 renderFeedList();
-if(feeds.length>0){selectFeed(null);loadFromCache();cFiltered=null;renderFeedList();renderArticleList();initSync()}else{navigate('feeds');initSync()}
+(async()=>{try{await openCacheDB();await migrateCache()}catch{}
+if(feeds.length>0){let sv=null;try{sv=JSON.parse(sessionStorage.getItem('siphon_view'))}catch{}
+activeFeedUrl=sv?.feed??null;activeArticleIdx=-1;await loadFromCache();cFiltered=null;
+if(sv?.article){const f=getFiltered();const ri=f.findIndex(a=>articleKey(a)===sv.article);if(ri>=0){openArticle(ri)}else{renderFeedList();renderArticleList();navigate('list')}}
+else{renderFeedList();renderArticleList();navigate('list')}initSync()}else{navigate('feeds');initSync()}})();
+history.replaceState({view:'feeds'},'');if(currentView!=='feeds')history.pushState({view:currentView},'');_navPush=true;
+window.addEventListener('popstate',e=>{_navPush=false;const v=e.state?.view||'feeds';if(v==='reader'&&activeArticleIdx>=0)navigate('reader');else if(v==='list')showList();else showFeeds();_navPush=true});
 </script>
 </body>
 </html>
