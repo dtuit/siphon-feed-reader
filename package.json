@@ -1,0 +1,13 @@
+{
+  "name": "siphon-feed-reader",
+  "private": true,
+  "scripts": {
+    "build": "node build.js",
+    "deploy": "node build.js && wrangler deploy",
+    "format": "prettier --write src/"
+  },
+  "devDependencies": {
+    "html-minifier-terser": "^7.2.0",
+    "prettier": "^3"
+  }
+}

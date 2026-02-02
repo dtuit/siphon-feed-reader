@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src * data:; connect-src 'self'; base-uri 'none'; form-action 'none';"
+    />
+    <title>Siphon — Browser Feed Reader</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <div class="topbar">
+        <div class="topbar-logo">
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M4 11a9 9 0 0 1 9 9" />
+            <path d="M4 4a16 16 0 0 1 16 16" />
+            <circle cx="5" cy="19" r="1.5" fill="currentColor" />
+          </svg>
+          Siphon
+        </div>
+        <div class="topbar-breadcrumb" id="breadcrumb"></div>
+        <div class="topbar-right">
+          <div class="auto-label" id="nextRefreshLabel"></div>
+          <div
+            id="globalLoading"
+            style="display: none; align-items: center; gap: 8px"
+          ></div>
+        </div>
+      </div>
+      <div class="panels" id="panels">
+        <div class="panel feeds-panel" id="feedsPanel">
+          <div class="add-feed">
+            <div class="add-feed-row">
+              <input
+                type="text"
+                id="feedUrl"
+                placeholder="Paste feed URL…"
+                spellcheck="false"
+                autocomplete="off"
+              /><button class="btn" id="addBtn" onclick="addFeed()">Add</button>
+            </div>
+            <div class="add-error" id="addError"></div>
+          </div>
+          <div class="feed-list" id="feedList"></div>
+          <div class="feeds-footer">
+            <button class="btn btn-small btn-ghost" onclick="refreshAll(true)">
+              ↻ Refresh all</button
+            ><button class="btn btn-small btn-ghost" onclick="exportOpml()">
+              Export</button
+            ><button
+              class="btn btn-small btn-ghost"
+              onclick="document.getElementById('opmlImport').click()"
+            >
+              Import</button
+            ><input
+              type="file"
+              id="opmlImport"
+              accept=".opml,.xml,.txt"
+              style="display: none"
+              onchange="importOpml(event)"
+            />
+          </div>
+          <div class="sync-section">
+            <div class="sync-row">
+              <input
+                type="password"
+                class="sync-input"
+                id="syncPhrase"
+                placeholder="Sync passphrase…"
+                spellcheck="false"
+                autocomplete="off"
+              /><button
+                class="btn btn-small btn-ghost"
+                id="syncBtn"
+                onclick="syncNow()"
+              >
+                Sync
+              </button>
+            </div>
+            <div class="sync-status" id="syncStatus"></div>
+          </div>
+          <div class="cors-note">Feeds are fetched via the built-in proxy.</div>
+        </div>
+        <div class="panel list-panel hidden-right" id="listPanel">
+          <div class="list-header">
+            <button class="btn-icon back-btn" onclick="history.back()">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+            </button>
+            <div class="list-header-title" id="listTitle">All Articles</div>
+            <div class="list-header-count" id="listCount"></div>
+          </div>
+          <div class="toggle-row">
+            <label class="toggle-label" onclick="toggleHideRead()"
+              >Hide read</label
+            ><span class="unread-count-badge" id="unreadBadge"></span>
+            <div
+              class="toggle-switch"
+              id="hideReadToggle"
+              onclick="toggleHideRead()"
+            ></div>
+            <div style="flex: 1"></div>
+            <button class="btn btn-small btn-ghost" onclick="markAllRead()">
+              Mark all read
+            </button>
+          </div>
+          <div class="article-list" id="articleList"></div>
+        </div>
+        <div class="panel reader-panel hidden-right" id="readerPanel">
+          <div class="reader-header">
+            <button class="btn-icon back-btn" onclick="history.back()">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="15 18 9 12 15 6" />
+              </svg></button
+            ><span class="loading-text" id="readerHeaderLabel" style="flex: 1"
+              >Reading</span
+            ><button
+              class="btn-icon"
+              onclick="history.back()"
+              title="Close article"
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+          <div class="reader-scroll" id="readerScroll">
+            <div class="state-message">
+              <div class="state-title">Select an article</div>
+              <div class="state-desc">
+                Pick something from the list to read it here.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>

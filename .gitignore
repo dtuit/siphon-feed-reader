@@ -12,5 +12,8 @@ Thumbs.db
 # Node
 node_modules/
 
+# Build output
+public/index.html
+
 # Wrangler
 .wrangler/
